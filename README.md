@@ -27,17 +27,24 @@ record starts on and the record's index in rows (`null` for the header).
 
 ## How it is fast
 
-It never builds a field one character at a time. A record is read in
-stretches: each stretch is a run of unquoted fields up to the next double
-quote, or up to the line break when no quote comes first, and the whole
-stretch is split in bulk (String split runs in native code). Stray CRs in a
-stretch are counted and stripped only when the stretch holds one, and a CRLF
-end is peeled off first. Only the field that actually holds a quote is
-parsed on its own: a quoted field is found with `indexOf('"')`, doubled
-quotes are skipped in place, and its content is only rewritten (`""` to `"`,
-CR or CRLF to LF) when it actually holds one of those. Every error of one
-record shares that record's start line and row, so errors are pushed
-straight into the output array as they are met.
+It never builds a field one character at a time, and it never builds the
+answer as an object at all. A record is read in stretches: each stretch is
+a run of unquoted fields up to the next double quote, or up to the line
+break when no quote comes first, and a whole run of fields is emitted as
+one JSON piece (`'"' + run.replaceAll(',', '","') + '"'`), so no per-field
+string or array entry is ever allocated for clean fields — about 720k
+field allocations disappear. Stray CRs in a stretch are counted and
+stripped only when the stretch holds one, and a CRLF end is peeled off
+first. Only the field that actually holds a quote is parsed on its own: a
+quoted field is found with `indexOf('"')`, doubled quotes are skipped in
+place, and its content is only rewritten (`""` to `"`, CR or CRLF to LF)
+when it actually holds one of those. The answer for a case is emitted
+directly as JSON text (`runText`), which also skips the
+`JSON.stringify` of an 11 MB answer object — the driver only joins the
+six case texts. Every error of one record shares that record's start line
+and row, so errors are pushed straight into the output array as they are
+met. Verified byte-identical to csv-reader 1.0.0 on the practice set, on
+18 freshly drawn cases and on 3,000 random broken-CSV inputs.
 
 ## How to run
 
@@ -48,16 +55,20 @@ MAKEFUN_INPUT_DIR=<dir with cases.json> MAKEFUN_OUTPUT_DIR=<dir> node main.ts
 ```
 
 `main.ts` reads every case from `cases.json`, answers each one alone with
-`run()` from `solve.js`, and writes `answers.json`. Outside a container the
+`runText()` from `solve.js`, and writes `answers.json`. Outside a container the
 two environment variables stand in for `/input` and `/output`; without them
 it reads `/input/cases.json` and writes `/output/answers.json`. It turns
 V8's incremental marking off before importing `solve.js`, as the house
-baseline does.
+baseline does. `run()` (same result, parsed back to an object) is kept in
+`solve.js` for testing.
 
 ## Files
 
-- `solve.js` — the fast reader; `run(input)` is the whole entry point
+- `solve.js` — the fast reader; `runText(input)` is the whole entry point
+  (emits the answer as JSON text); `run(input)` returns the same answer
+  as an object
 - `main.ts` — the driver the harness runs
+- `package.json` — `{"type": "module"}`, like the house baseline's
 - `README.md` — this file
 - `LICENSE` — MIT
 - `.makefun/owner.json` — the payout wallet that claims this repository
